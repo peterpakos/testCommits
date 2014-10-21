@@ -1,0 +1,230 @@
+#!/bin/bash
+#
+# This script is used to measure the performance of commits to SVN repository.
+#
+# Before starting the test it would be a good idea to reset the replicator and
+# also delete and re-create the repository.
+#
+# Parameters:
+#
+#    <URL>	   	   Repository url including the repository name
+#    <#Users>		   Number of users to perform commits
+#    <UsernameBase>	   See description below
+#    <Password>   	   Password used to connect to the repository
+#    <#Iterations>	   Number of commit iterations to perform (per user)
+#    <#ConcurrentCommits> Number of concurrent commits per user
+#    <DirToCommit>	   Name of subdir of current/working dir to commit
+#
+# Make sure you have set up enough users before beginning the testing.
+# The usernames should be in the following format: <UsernameBase>1,
+# <UsernameBase>2, <UsernameBase>3 up to <#Users> with the same password set.
+#
+# Multiple user example:
+# ./testCommits.sh http://10.2.5.100/svn/repo 3 user pass 10 1 30MB
+#
+# For the above example there there should be 3 users set up that can access
+# the repository: user1, user2 and user3 with the same password "pass".
+#
+# Single user example:
+# ./concurrentCommits.sh http://10.2.5.100/svn/repo 1 user pass 10 8 30MB
+#
+# In this case there should be 1 user set up: user1 with password "pass".
+
+set -e
+
+##### VARIABLES ##################################
+
+directoryRoot=$(pwd)
+URL="$1"
+repoName=$(basename "$1")
+WC="WorkingCopy"
+numberOfUsers="$2"
+userNameBase="$3"
+PASSWORD="$4"
+ITERATIONS="$5"
+concurrentCommits="$6"
+dirToCommit=$(basename "$7")
+
+##### END OF VARIABLES ###########################
+##### FUNCTIONS ##################################
+
+singular_plural ()
+{
+ if [ "$1" -eq "1" ]
+ then
+  return
+ else
+  echo "s"
+ fi
+}
+
+##### END OF FUNCTIONS ###########################
+
+if [ $# -ne "7" ]; then
+ 	echo -e "Please check parameters.\n"
+ 	echo "Usage:$0 <URL> <#Users> <UsernameBase> <Password> <#Iterations> <#ConcurrentCommits> <DirToCommit>"
+ 	echo "Example: $0 http://10.2.5.100/svn/repo 3 user pass 10 1 30MB"
+ 	exit 1
+fi
+
+if [[ $2 != [0-9]* ]]; then
+	echo "Incorrect parameter \"$2\", number of users has to be a number > 0."
+	exit 1
+fi
+
+if [ ! $2 -gt "0" ]; then
+	echo  "Number of users \"$2\" is not correct. It has to be a number > 0."
+	exit 1
+fi
+
+if [[ $5 != [0-9]* ]]; then
+        echo "Incorrect parameter \"$5\", number of iterations has to be a number greater than 0."
+        exit 1
+fi
+
+if [ ! $5 -gt "0" ]; then
+        echo  "Number of iterations \"$5\" has to be greater than 0."
+        exit 1
+fi
+
+if [[ $6 != [0-9]* ]]; then
+        echo "Incorrect parameter \"$6\", number of concurrent commits has to be a number greater than 0."
+        exit 1
+fi
+
+if [ ! $6 -gt "0" ]; then
+        echo  "Number of concurrent commits \"$6\" has to be greater than 0."
+        exit 1
+fi
+
+if [ ! -d "$directoryRoot/$dirToCommit" ]; then
+	echo "Directory \"$dirToCommit\" does not exist. Please select an existing directory in \"$directoryRoot\"."
+	exit 1
+fi
+
+dirSize=$(du -sh ${dirToCommit} | awk '{print $1}')
+dirCount=$(find ${dirToCommit} -type d | wc -l)
+dirFileCount=$(find ${dirToCommit} -type f | wc -l)
+
+if [ $numberOfUsers -gt "1" ]; then
+	if [ $concurrentCommits -gt "1" ]; then
+		echo "Disregarding number of concurrent commits setting in multi user test."
+		echo -e "It will be equal to the number of users commiting to the repository.\n"
+	fi
+	concurrentCommits=$numberOfUsers
+	MS='multi-'
+else
+	MS='single '
+fi
+
+# Remove temporary files if they exist
+rm -rf ${WC}* total iteration*
+
+# Prepare repository for test
+
+# Checkout repo and delete its content
+svn --no-auth-cache --username ${userNameBase}1 --password "$PASSWORD" checkout "$URL" "$WC" > /dev/null
+
+# Cleaning repository if not empty
+if [ "$(/bin/ls -A $WC | grep -v '.svn')" ]; then
+ 	echo -n "Cleaning repository... "
+      	cd "$WC"
+        svn --no-auth-cache --username ${userNameBase}1 --password "$PASSWORD" rm * > /dev/null
+        svn --no-auth-cache --username ${userNameBase}1 --password "$PASSWORD" commit -m "Cleaning up repository" > /dev/null
+        cd ..
+	echo -e "done.\n"
+fi
+
+CS=$(singular_plural $concurrentCommits)
+IS=$(singular_plural $ITERATIONS)
+FS=$(singular_plural $dirFileCount)
+DS=$(singular_plural $dirCount)
+
+if [ $concurrentCommits -eq "1" ]; then
+	CON=''
+else
+	CON='concurrent '
+fi
+
+echo -e "Running $ITERATIONS iteration${IS} of ${concurrentCommits} ${MS}user ${CON}commit${CS} (${dirCount} dir${DS}, ${dirFileCount} file${FS} - $dirSize) to repository \"$repoName\":\n"
+
+# Perform set number of iterations of the concurrent commits to get a good average time
+for (( k = 1; k <= $ITERATIONS; k++ ))
+do
+ 	echo -ne "Iteration #${k}:\t"
+
+	# Checkout each individual working copy in different folders and add files to each WC to get ready for commits
+	for (( i = 1; i <= $concurrentCommits; i++ ))
+	do
+		if [ $numberOfUsers -eq 1 ]; then
+			USERNAME=${userNameBase}1
+		else
+			USERNAME=${userNameBase}${i}
+		fi
+
+		svn --no-auth-cache --username ${USERNAME} --password ${PASSWORD} checkout $URL ${WC}${i} > /dev/null
+
+		cd ${WC}${i}
+
+		# Create a temporary folder for commit
+		mkdir commit${i}
+
+		# Copy existing content of the repo into temporary folder
+		cp -r $directoryRoot/$dirToCommit commit${i}
+
+		# Add the files to subversion ready for commit
+		svn --no-auth-cache --username ${USERNAME} --password ${PASSWORD} add commit${i} > /dev/null
+
+		cd ..
+	done
+
+	# Perform the commit test: go in each working copy and start the commit job in the background
+	for (( i = 1; i <= $concurrentCommits; i++ ))
+	do
+		cd ${WC}${i}
+
+                if [ $numberOfUsers -eq 1 ]; then
+                        USERNAME=${userNameBase}1
+                else
+                        USERNAME=${userNameBase}${i}
+                fi
+
+		### TIMING TEST HERE ###
+		( \time -f "%e" svn commit --no-auth-cache --username ${USERNAME} --password ${PASSWORD} -m "Benchmarked commit $i" commit${i} > /dev/null & ) 2>> ../iteration${k}_commit${i}
+		### TIMING TEST END ###
+
+		cd ..
+	done
+
+	# Wait for the commit jobs to complete
+	while [ `ps -ef | grep "svn commit"| grep -v grep | wc -l` -ne 0 ]
+	do
+		sleep 5
+	done
+
+	# Add the times to a total file
+	cat iteration${k}_* >> total
+	avg=`awk '{sum+=$1}END{print sum/NR}' iteration${k}*`
+	echo "${avg}s"
+
+	# Clean up the repo to get it ready for the next commit
+   	cd "$WC"
+    	svn --no-auth-cache --username ${userNameBase}1 --password "$PASSWORD" cleanup > /dev/null
+    	svn --no-auth-cache --username ${userNameBase}1 --password "$PASSWORD" update > /dev/null
+    	svn --no-auth-cache --username ${userNameBase}1 --password "$PASSWORD" rm * > /dev/null
+    	svn --no-auth-cache --username ${userNameBase}1 --password "$PASSWORD" -m "Cleaning up repository" ci > /dev/null
+	cd ..
+	
+	# Remove the working copies
+	rm -rf ${WC}[1-${concurrentCommits}]
+done
+
+# Get the average from the total file
+avg=`awk '{sum+=$1}END{print sum/NR}' total`
+
+# Remove temporary files if they exist
+rm -rf ${WC}* total iteration*
+
+echo -e "\nAverage commit time: ${avg}s."
+
+###END###
