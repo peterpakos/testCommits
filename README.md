@@ -8,17 +8,17 @@ also delete and re-create the repository.
 
 Parameters:
 
-- <URL>           Repository url including the repository name
-- <Users>         Number of users to perform commits
-- <UsernameBase>      See description below
-- <Password>          Password used to connect to the repository
-- <Iterations>    Number of commit iterations to perform (per user)
-- <ConcurrentCommits> Number of concurrent commits per user
-- <DirToCommit>       Name of subdir of current/working dir to commit
+- URL               - Repository url including the repository name
+- Users             - Number of users to perform commits
+- UsernameBase      - See description below
+- Password          - Password used to connect to the repository
+- Iterations        - Number of commit iterations to perform (per user)
+- ConcurrentCommits - Number of concurrent commits per user
+- DirToCommit       - Name of subdir of current/working dir to commit
 
 Make sure you have set up enough users before beginning the testing.
-The usernames should be in the following format: <UsernameBase>1,
-<UsernameBase>2, <UsernameBase>3 up to <Users> with the same password set.
+The usernames should be in the following format: UsernameBase1,
+UsernameBase2, UsernameBase3 up to Users with the same password set.
 
 Multiple user example:
 ./testCommits.sh http://10.2.5.100/svn/repo 3 user pass 10 1 30MB
