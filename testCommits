@@ -30,7 +30,7 @@
 #
 # In this case there should be 1 user set up: user1 with password "pass".
 
-set -e
+set -euo pipefail
 
 ##### VARIABLES ##################################
 
