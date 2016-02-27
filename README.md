@@ -1,6 +1,4 @@
-testCommits
-===========
-
+# testCommits
 This script is used to measure the performance of commits to SVN repository.
 
 Before starting the test it would be a good idea to reset the replicator and
